@@ -1,8 +1,6 @@
 services:
   bunnylol:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/mbinns/bunnylol.rs:latest
     container_name: bunnylol
     restart: unless-stopped
     ports:
