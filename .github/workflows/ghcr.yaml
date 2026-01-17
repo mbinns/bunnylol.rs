@@ -1,8 +1,8 @@
 name: Publish Bunnylol to ghcr
 
 on:
-  push:
-    branches: ['main']
+  release:
+    types: [published]
 
 env:
   REGISTRY: ghcr.io
@@ -34,6 +34,12 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha
+
+            type=semver,pattern={{version}}
+
+            type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build/Push
         id: push
@@ -43,6 +49,8 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           
       - name: Generate artifact attestation
         uses: actions/attest-build-provenance@v3
