@@ -89,6 +89,7 @@ impl BunnylolCommandRegistry {
         crate::commands::MdnCommand,
         crate::commands::NodeCommand,
         crate::commands::NugetCommand,
+        crate::commands::OpenCommand,
         crate::commands::PackagistCommand,
         crate::commands::PypiCommand,
         crate::commands::PythonCommand,
@@ -167,10 +168,10 @@ mod cache_tests {
         assert!(lookup.contains_key("r"));
         assert!(lookup.contains_key("reddit"));
 
-        // Verify we have 82+ total bindings (46 commands with multiple aliases each)
+        // Verify we have 83+ total bindings (47 commands with multiple aliases each)
         assert!(
-            lookup.len() >= 82,
-            "Expected at least 82 bindings, got {}",
+            lookup.len() >= 83,
+            "Expected at least 83 bindings, got {}",
             lookup.len()
         );
     }
@@ -195,7 +196,7 @@ mod cache_tests {
         let commands = BunnylolCommandRegistry::get_all_commands();
 
         // Verify we have all expected commands
-        assert_eq!(commands.len(), 46, "Expected 46 commands");
+        assert_eq!(commands.len(), 47, "Expected 47 commands");
 
         // Verify cache returns same pointer (not regenerated)
         let commands2 = BunnylolCommandRegistry::get_all_commands();

@@ -55,10 +55,11 @@ mod server_impl {
             Some(cmd_str) => {
                 println!("bunnylol command: {}", cmd_str);
 
-                let command = utils::get_command_from_query_string(cmd_str);
+                let resolved_cmd = config.resolve_command(cmd_str);
+                let command = utils::get_command_from_query_string(&resolved_cmd);
                 let redirect_url = BunnylolCommandRegistry::process_command_with_config(
                     command,
-                    cmd_str,
+                    &resolved_cmd,
                     Some(config.inner()),
                 );
                 println!("redirecting to: {}", redirect_url);
@@ -131,4 +132,34 @@ pub async fn launch(config: BunnylolConfig) -> Result<(), Box<rocket::Error>> {
         .launch()
         .await?;
     Ok(())
+}
+
+#[cfg(all(test, feature = "server"))]
+mod tests {
+    use std::collections::HashMap;
+
+    use rocket::http::Status;
+    use rocket::local::blocking::Client;
+
+    use super::*;
+
+    #[test]
+    fn test_search_resolves_aliases() {
+        let mut config = BunnylolConfig::default();
+        config.history.enabled = false;
+        config.aliases = HashMap::from([("work".to_string(), "gh mbinns".to_string())]);
+
+        let rocket = rocket::build()
+            .manage(config)
+            .mount("/", rocket::routes![search]);
+        let client = Client::tracked(rocket).expect("valid rocket instance");
+
+        let response = client.get("/?cmd=work").dispatch();
+
+        assert_eq!(response.status(), Status::SeeOther);
+        assert_eq!(
+            response.headers().get_one("Location"),
+            Some("https://github.com/mbinns")
+        );
+    }
 }
