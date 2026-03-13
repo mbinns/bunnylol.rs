@@ -15,10 +15,12 @@ This guide provides context about the bunnylol.rs repository structure and patte
 
 **Key Features:**
 - Smart URL routing with command patterns (e.g., `gh username/repo` → GitHub)
+- Configurable default search engine fallback (`google`, `ddg`, `bing`, `kagi`)
 - Multiple aliases per command (e.g., `ig`/`instagram`, `tw`/`twitter`)
 - Subcommand support (e.g., `meta pay`, `ig reels`)
-- Default Google search fallback
-- Web portal to view all command bindings
+- User-defined command aliases from config
+- Web portal to view all command bindings and aliases
+- Alias management from the web UI (add/delete with flash notices)
 - Unified CLI with command execution and server management
 
 ## Repository Structure
@@ -29,26 +31,22 @@ bunnylol.rs/
 │   ├── main.rs                          # CLI entry point and dispatcher
 │   ├── lib.rs                           # Library exports
 │   ├── config.rs                        # Configuration (server, aliases, history)
+│   ├── bunnylol_command_registry.rs     # Command registry and command metadata cache
+│   ├── history.rs                       # Command history persistence
 │   ├── server/
-│   │   ├── mod.rs                       # Rocket server setup and routing
-│   │   ├── routes.rs                    # HTTP route handlers
-│   │   └── web.rs                       # Web response helpers
+│   │   ├── mod.rs                       # Rocket server setup, routes, alias mutations
+│   │   ├── service.rs                   # Service install/start/stop/log helpers
+│   │   └── web.rs                       # SSR landing page and bindings/aliases UI
 │   ├── commands/
 │   │   ├── mod.rs                       # Module exports
 │   │   ├── github.rs                    # Example: gh command
 │   │   ├── instagram.rs                 # Example: ig command with subcommands
 │   │   ├── meta.rs                      # Example: meta command with subcommands
-│   │   └── [30+ other command files]
+│   │   └── [40+ other command files]
 │   ├── utils/
-│   │   ├── bunnylol_command.rs          # Core trait & registry
+│   │   ├── mod.rs                       # Query-string helpers
 │   │   └── url_encoding.rs              # URL building helpers
-│   ├── components/
-│   │   └── bindings_page.rs             # Leptos UI for /bindings
-│   └── service_installer/               # Cross-platform service installation
-│       ├── mod.rs
-│       ├── installer.rs                 # Install/uninstall services
-│       ├── manager.rs                   # Service management (start/stop/logs)
-│       └── error.rs                     # Error types
+│   └── tests/                           # Integration tests live at repository root
 ├── Cargo.toml
 ├── docker-compose.yml
 ├── Dockerfile
@@ -60,13 +58,13 @@ bunnylol.rs/
 
 ### 1. BunnylolCommand Trait
 
-All commands implement the `BunnylolCommand` trait defined in `src/utils/bunnylol_command.rs`:
+All commands implement the `BunnylolCommand` trait defined in `src/commands/bunnylol_command.rs`:
 
 ```rust
 pub trait BunnylolCommand {
     const BINDINGS: &'static [&'static str];  // Command aliases
     fn process_args(args: &str) -> String;     // Returns URL
-    fn get_info() -> CommandInfo;              // For documentation
+    fn get_info() -> BunnylolCommandInfo;      // For documentation
 }
 ```
 
@@ -81,9 +79,10 @@ Commands are registered in two places:
    // ... etc
    ```
 
-2. **`src/utils/bunnylol_command.rs`** - In `BunnylolCommandRegistry`:
-   - `process_command()` method (~line 74-108): Routes commands to handlers
-   - `get_all_commands()` method (~line 112-148): Lists all commands for /bindings page
+2. **`src/bunnylol_command_registry.rs`** - In `BunnylolCommandRegistry`:
+   - `register_commands!` macro expands the lookup table and command listing
+   - `process_command_with_config()` handles command routing plus configurable fallback search
+   - `get_all_commands()` powers both CLI listing and the server landing page
 
 ### 3. URL Building Helpers
 
@@ -97,7 +96,7 @@ Located in `src/utils/url_encoding.rs`:
 
 1. **Create command file** in `src/commands/your_command.rs`:
    ```rust
-   use crate::utils::bunnylol_command::{BunnylolCommand, CommandInfo};
+   use crate::commands::bunnylol_command::{BunnylolCommand, BunnylolCommandInfo};
 
    pub struct YourCommand;
 
@@ -110,8 +109,8 @@ Located in `src/utils/url_encoding.rs`:
            "https://example.com".to_string()
        }
 
-       fn get_info() -> CommandInfo {
-           CommandInfo {
+       fn get_info() -> BunnylolCommandInfo {
+           BunnylolCommandInfo {
                bindings: Self::BINDINGS.iter().map(|s| s.to_string()).collect(),
                description: "Description here".to_string(),
                example: "alias1 example".to_string(),
@@ -181,7 +180,7 @@ Located in `src/utils/url_encoding.rs`:
 
 ```bash
 # Run all tests
-cargo test
+cargo test --features server
 
 # Run tests for specific command
 cargo test instagram
@@ -215,7 +214,7 @@ fn test_instagram_command_reels() {
 
 ```bash
 # Development
-cargo run -- serve            # Starts server on localhost:8000
+cargo run -- serve             # Starts server on localhost:8000
 cargo run -- gh facebook/react # Execute a command
 cargo build                   # Build without running
 cargo check                   # Fast syntax check
@@ -228,11 +227,11 @@ BUNNYLOL_PORT=9000 docker compose up  # Custom port
 cargo test                    # Run all tests
 cargo test --test ''          # (Don't use - this errors)
 
-# Service Installation (cross-platform: Linux/macOS/Windows)
+# Service management
 cargo install --path .
-sudo bunnylol install-server --system  # System-level service
-bunnylol install-server                # User-level service
-sudo bunnylol server status --system   # Check status
+bunnylol service install
+bunnylol service status
+bunnylol service logs
 ```
 
 ## Key Implementation Details
@@ -241,12 +240,38 @@ sudo bunnylol server status --system   # Check status
 
 1. User types: `http://localhost:8000/?cmd=ig reels`
 2. Rocket routes to main handler
-3. `BunnylolCommandRegistry::process_command()` extracts command: `"ig"`
-4. Registry matches `"ig"` to `InstagramCommand`
-5. `InstagramCommand::process_args("ig reels")` is called
-6. `get_command_args()` strips `"ig"` prefix → `"reels"`
-7. Command returns `"https://www.instagram.com/reels/"`
-8. Server sends 302 redirect
+3. Server resolves config aliases first (e.g. `work` → `gh myorg/repo`)
+4. `BunnylolCommandRegistry::process_command_with_config()` extracts command: `"ig"`
+5. Registry matches `"ig"` to `InstagramCommand`
+6. `InstagramCommand::process_args("ig reels")` is called
+7. `get_command_args()` strips `"ig"` prefix → `"reels"`
+8. Command returns `"https://www.instagram.com/reels/"`
+9. Server sends a redirect
+
+If no command matches, the configured default search engine is used.
+
+### Server State Pattern
+
+- The Rocket server stores `BunnylolConfig` inside `AppState { config: RwLock<BunnylolConfig> }`
+- The landing page reads config from that shared state on each request
+- Alias add/delete routes mutate the in-memory config and then persist it with `BunnylolConfig::save()`
+- UI status messages use Rocket flash messages instead of query params
+
+### Landing Page Behavior
+
+- The main page is rendered in `src/server/web.rs` with Leptos SSR
+- It has two tabs: built-in commands and configured aliases
+- The aliases tab includes:
+  - a form to add/update aliases
+  - per-alias delete buttons
+  - temporary flash notices that auto-dismiss on the client
+- The setup/help content is behind a small `?` button in the top-left
+
+### Search Engine Notes
+
+- Unknown commands fall back to the configured search engine in `BunnylolConfig::get_search_url()`
+- Supported config fallback values are `google`, `ddg`/`duckduckgo`, `bing`, and `kagi`
+- Kagi is also available as an explicit command via `kagi` or `kg`
 
 ### Multiple Alias Pattern
 
@@ -305,14 +330,14 @@ Add parsing logic in `process_args()` (see `reddit.rs` for `r/` pattern)
 
 ## Recent Changes
 
-- 2025-12-30: **Major refactor** - Merged binaries, added cross-platform service installation
+- 3-12-26: **Major refactor** - Merged binaries, added cross-platform service installation
   - Unified `bunnylol-server` and `bunnylol-cli` into single `bunnylol` binary
   - Server now runs with `bunnylol serve` subcommand
   - Added cross-platform service installation (systemd/launchd/Windows Service)
   - New service management commands: `install-server`, `server start/stop/status/logs`, etc.
   - Moved server code to `src/server/` module
   - Added `ServerConfig` to centralize server configuration
-- 2025-12-29: Added `meta pay`, `ig reels`, `ig messages/msg/chat` subcommands
+- 3-12-26: Added `meta pay`, `ig reels`, `ig messages/msg/chat` subcommands
 - See git log for full history: `git log --oneline`
 
 ## Troubleshooting
@@ -344,4 +369,4 @@ Add parsing logic in `process_args()` (see `reddit.rs` for `r/` pattern)
 
 ---
 
-*This guide is intended for AI assistants working on this codebase. Last updated: 2025-12-30*
+*This guide is intended for AI assistants working on this codebase. Last updated: 3-12-26*

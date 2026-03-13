@@ -92,7 +92,7 @@ mod server_impl {
                 let command = utils::get_command_from_query_string(&resolved_cmd);
                 let redirect_url = BunnylolCommandRegistry::process_command_with_config(
                     command,
-                    cmd_str,
+                    &resolved_cmd,
                     Some(&config),
                 );
                 println!("redirecting to: {}", redirect_url);
@@ -265,8 +265,11 @@ mod tests {
         config.history.enabled = false;
         config.aliases = HashMap::from([("work".to_string(), "gh mbinns".to_string())]);
 
+        let state = AppState {
+            config: RwLock::new(config),
+        };
         let rocket = rocket::build()
-            .manage(config)
+            .manage(state)
             .mount("/", rocket::routes![search]);
         let client = Client::tracked(rocket).expect("valid rocket instance");
 
