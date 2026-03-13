@@ -6,17 +6,66 @@
  */
 
 use leptos::*;
+use rocket::request::FlashMessage;
 use serde::{Deserialize, Serialize};
 
 use crate::{BunnylolCommandInfo, BunnylolCommandRegistry, BunnylolConfig};
 
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct LandingPageState {
+    pub active_tab: String,
+    pub alias_notice: Option<AliasNotice>,
+}
+
+impl LandingPageState {
+    pub fn new(tab: Option<&str>, flash: Option<FlashMessage<'_>>) -> Self {
+        let alias_notice = flash.map(|flash| AliasNotice {
+            kind: match flash.kind() {
+                "error" => AliasNoticeKind::Error,
+                "deleted" => AliasNoticeKind::Deleted,
+                _ => AliasNoticeKind::Success,
+            },
+            message: flash.message().to_string(),
+        });
+        let active_tab = match tab {
+            Some("aliases") => "aliases".to_string(),
+            _ if alias_notice.is_some() => "aliases".to_string(),
+            _ => "commands".to_string(),
+        };
+
+        Self {
+            active_tab,
+            alias_notice,
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct AliasNotice {
+    pub kind: AliasNoticeKind,
+    pub message: String,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub enum AliasNoticeKind {
+    Success,
+    Deleted,
+    Error,
+}
+
 /// Render the landing page HTML with the given config
-pub fn render_landing_page_html(config: &BunnylolConfig) -> String {
+pub fn render_landing_page_html(config: &BunnylolConfig, page_state: &LandingPageState) -> String {
     let display_url = config.server.get_display_url();
     let aliases = config.aliases.clone();
+    let initial_tab = page_state.active_tab.clone();
+    let page_state = page_state.clone();
     let body_content = leptos::ssr::render_to_string(move || {
         view! {
-            <LandingPage server_display_url=display_url.clone() aliases=aliases.clone() />
+            <LandingPage
+                server_display_url=display_url.clone()
+                aliases=aliases.clone()
+                page_state=page_state.clone()
+            />
         }
     })
     .to_string();
@@ -109,10 +158,11 @@ pub fn render_landing_page_html(config: &BunnylolConfig) -> String {
                             }}
                         </style>
                     </head>
-                    <body>
+                    <body data-initial-tab="{}">
                         {}
                         <script>
                             (() => {{
+                                const initialTab = document.body.dataset.initialTab || 'commands';
                                 const buttons = Array.from(document.querySelectorAll('[data-tab-button]'));
                                 const panels = Array.from(document.querySelectorAll('[data-tab-panel]'));
                                 const showTab = (tabName) => {{
@@ -128,7 +178,7 @@ pub fn render_landing_page_html(config: &BunnylolConfig) -> String {
                                 buttons.forEach((button) => {{
                                     button.addEventListener('click', () => showTab(button.dataset.tabButton));
                                 }});
-                                showTab('commands');
+                                showTab(initialTab);
 
                                 const helpButton = document.querySelector('[data-help-button]');
                                 const helpPanel = document.querySelector('[data-help-panel]');
@@ -141,11 +191,18 @@ pub fn render_landing_page_html(config: &BunnylolConfig) -> String {
                                         helpPanel.hidden = isOpen;
                                     }});
                                 }}
+
+                                const aliasNotice = document.querySelector('[data-alias-notice]');
+                                if (aliasNotice) {{
+                                    window.setTimeout(() => {{
+                                        aliasNotice.remove();
+                                    }}, 5000);
+                                }}
                             }})();
                         </script>
                     </body>
                 </html>"#,
-        body_content
+        initial_tab, body_content
     )
 }
 
@@ -243,13 +300,58 @@ fn AliasCard(alias: AliasData) -> impl IntoView {
             style:padding="20px"
             style:transition="transform 0.2s, box-shadow 0.2s"
             style:border="2px solid #ffd8a8"
+            style:position="relative"
         >
+            <form
+                action="/aliases/delete"
+                method="post"
+                style:position="absolute"
+                style:top="12px"
+                style:right="12px"
+            >
+                <input type="hidden" name="alias" value=alias.alias.clone() />
+                <button
+                    type="submit"
+                    aria-label={format!("Delete alias {}", alias.alias)}
+                    title="Delete alias"
+                    style:width="34px"
+                    style:height="34px"
+                    style:border-radius="999px"
+                    style:border="1px solid #f1c3bb"
+                    style:background="rgba(255, 255, 255, 0.92)"
+                    style:color="#b44c39"
+                    style:display="flex"
+                    style:align-items="center"
+                    style:justify-content="center"
+                    style:cursor="pointer"
+                    style:box-shadow="0 6px 14px rgba(180, 76, 57, 0.10)"
+                >
+                    <svg
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        aria-hidden="true"
+                    >
+                        <path d="M3 6h18"></path>
+                        <path d="M8 6V4h8v2"></path>
+                        <path d="M19 6l-1 14H6L5 6"></path>
+                        <path d="M10 11v6"></path>
+                        <path d="M14 11v6"></path>
+                    </svg>
+                </button>
+            </form>
             <div
                 style:font-family="'JetBrains Mono', monospace"
                 style:font-size="1.3em"
                 style:font-weight="700"
                 style:color="var(--accent-purple)"
                 style:margin-bottom="12px"
+                style:padding-right="40px"
             >
                 {alias.alias}
             </div>
@@ -281,6 +383,7 @@ fn AliasCard(alias: AliasData) -> impl IntoView {
 pub fn LandingPage(
     server_display_url: String,
     aliases: std::collections::HashMap<String, String>,
+    page_state: LandingPageState,
 ) -> impl IntoView {
     let mut bindings: Vec<BindingData> = BunnylolCommandRegistry::get_all_commands()
         .iter()
@@ -298,6 +401,8 @@ pub fn LandingPage(
     let alias_count = alias_entries.len();
     let has_aliases = alias_count > 0;
     let alias_entries = store_value(alias_entries);
+    let active_tab = page_state.active_tab.clone();
+    let alias_notice = page_state.alias_notice.clone();
 
     // Clone server_display_url for use in the view
     let example_url = format!("{}/?cmd=gh facebook/bunnylol.rs", server_display_url);
@@ -534,18 +639,18 @@ pub fn LandingPage(
                 style:flex-wrap="wrap"
             >
                 <button
-                    class="tab-button active"
+                    class=if active_tab == "commands" { "tab-button active" } else { "tab-button" }
                     type="button"
                     data-tab-button="commands"
-                    aria-selected="true"
+                    aria-selected=if active_tab == "commands" { "true" } else { "false" }
                 >
                     {format!("Commands ({})", binding_count)}
                 </button>
                 <button
-                    class="tab-button"
+                    class=if active_tab == "aliases" { "tab-button active" } else { "tab-button" }
                     type="button"
                     data-tab-button="aliases"
-                    aria-selected="false"
+                    aria-selected=if active_tab == "aliases" { "true" } else { "false" }
                 >
                     {format!("Aliases ({})", alias_count)}
                 </button>
@@ -569,8 +674,132 @@ pub fn LandingPage(
             <div
                 data-tab-panel="aliases"
                 class="tab-panel"
-                hidden=true
+                hidden=active_tab != "aliases"
             >
+                {alias_notice.map(|notice| {
+                    let (background, border, title) = match notice.kind {
+                        AliasNoticeKind::Success => ("#eefbf3", "#8bd8a8", "Saved"),
+                        AliasNoticeKind::Deleted => ("#fff3f1", "#f2b3a8", "Deleted"),
+                        AliasNoticeKind::Error => ("#fff3f1", "#f2b3a8", "Could not save"),
+                    };
+
+                    view! {
+                        <div
+                            data-alias-notice
+                            style:background=background
+                            style:border={format!("1px solid {}", border)}
+                            style:border-radius="10px"
+                            style:padding="16px 18px"
+                            style:margin-bottom="20px"
+                            style:color="var(--text-dark)"
+                        >
+                            <div
+                                style:font-size="0.9em"
+                                style:font-weight="700"
+                                style:margin-bottom="6px"
+                            >
+                                {title}
+                            </div>
+                            <div style:line-height="1.6">
+                                {notice.message}
+                            </div>
+                        </div>
+                    }
+                })}
+
+                <div
+                    style:background="linear-gradient(135deg, #fff9e8 0%, #fff4d6 100%)"
+                    style:border="1px solid #ffd8a8"
+                    style:border-radius="10px"
+                    style:padding="22px"
+                    style:margin-bottom="22px"
+                >
+                    <div
+                        style:font-size="1.05em"
+                        style:font-weight="700"
+                        style:color="var(--text-dark)"
+                        style:margin-bottom="8px"
+                    >
+                        "Add an alias"
+                    </div>
+                    <div
+                        style:color="var(--text-medium)"
+                        style:line-height="1.7"
+                        style:margin-bottom="16px"
+                    >
+                        "Aliases become available immediately in the running server and are also written to your config file."
+                    </div>
+                    <form
+                        action="/aliases"
+                        method="post"
+                        style:display="grid"
+                        style:grid-template-columns="repeat(auto-fit, minmax(220px, 1fr))"
+                        style:gap="14px"
+                        style:align-items="end"
+                    >
+                        <label style:display="block">
+                            <div
+                                style:font-size="0.85em"
+                                style:font-weight="600"
+                                style:color="var(--text-medium)"
+                                style:margin-bottom="6px"
+                            >
+                                "Alias"
+                            </div>
+                            <input
+                                type="text"
+                                name="alias"
+                                required
+                                autocomplete="off"
+                                placeholder="work"
+                                style:width="100%"
+                                style:padding="12px"
+                                style:border="1px solid #e2c790"
+                                style:border-radius="8px"
+                                style:font-family="'JetBrains Mono', monospace"
+                                style:background="var(--bg-white)"
+                            />
+                        </label>
+                        <label style:display="block">
+                            <div
+                                style:font-size="0.85em"
+                                style:font-weight="600"
+                                style:color="var(--text-medium)"
+                                style:margin-bottom="6px"
+                            >
+                                "Resolves to"
+                            </div>
+                            <input
+                                type="text"
+                                name="target"
+                                required
+                                autocomplete="off"
+                                placeholder="gh facebook/react"
+                                style:width="100%"
+                                style:padding="12px"
+                                style:border="1px solid #e2c790"
+                                style:border-radius="8px"
+                                style:font-family="'JetBrains Mono', monospace"
+                                style:background="var(--bg-white)"
+                            />
+                        </label>
+                        <button
+                            type="submit"
+                            style:border="none"
+                            style:border-radius="999px"
+                            style:padding="12px 18px"
+                            style:font-family="'JetBrains Mono', monospace"
+                            style:font-weight="700"
+                            style:cursor="pointer"
+                            style:background="linear-gradient(135deg, var(--accent-blue) 0%, var(--accent-purple) 100%)"
+                            style:color="white"
+                            style:box-shadow="0 10px 20px rgba(83, 46, 209, 0.18)"
+                        >
+                            "Save alias"
+                        </button>
+                    </form>
+                </div>
+
                 <Show
                     when=move || has_aliases
                     fallback=|| view! {
@@ -592,16 +821,7 @@ pub fn LandingPage(
                                 "No aliases configured"
                             </div>
                             <div>
-                                "Add entries under "
-                                <code
-                                    style:font-family="'JetBrains Mono', monospace"
-                                    style:background="var(--bg-white)"
-                                    style:padding="2px 6px"
-                                    style:border-radius="4px"
-                                >
-                                    "[aliases]"
-                                </code>
-                                " in your config file and restart the server."
+                                "Use the form above to add your first alias."
                             </div>
                         </div>
                     }
@@ -634,10 +854,22 @@ mod tests {
             .aliases
             .insert("work".to_string(), "gh mycompany/repo".to_string());
 
-        let html = render_landing_page_html(&config);
+        let html = render_landing_page_html(
+            &config,
+            &LandingPageState {
+                active_tab: "aliases".to_string(),
+                alias_notice: Some(AliasNotice {
+                    kind: AliasNoticeKind::Success,
+                    message: "Alias saved.".to_string(),
+                }),
+            },
+        );
 
         assert!(html.contains("Aliases (1)"));
         assert!(html.contains("work"));
         assert!(html.contains("gh mycompany"));
+        assert!(html.contains("Save alias"));
+        assert!(html.contains("/aliases/delete"));
+        assert!(html.contains("Alias saved."));
     }
 }

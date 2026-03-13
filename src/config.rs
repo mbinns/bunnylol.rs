@@ -172,6 +172,17 @@ fn default_log_level() -> String {
 }
 
 impl BunnylolConfig {
+    fn get_existing_config_path() -> Option<PathBuf> {
+        let system_config = PathBuf::from("/etc/bunnylol/config.toml");
+        if system_config.exists() {
+            return Some(system_config);
+        }
+
+        Self::get_config_dir()
+            .map(|dir| dir.join("config.toml"))
+            .filter(|path| path.exists())
+    }
+
     /// Get the XDG base directories for bunnylol
     fn get_xdg_dirs() -> Option<xdg::BaseDirectories> {
         Some(xdg::BaseDirectories::with_prefix("bunnylol"))
@@ -199,9 +210,8 @@ impl BunnylolConfig {
     /// Returns: /etc/bunnylol/config.toml (system-wide, preferred)
     ///       or $XDG_CONFIG_HOME/bunnylol/config.toml (user-specific fallback)
     pub fn get_config_path() -> Option<PathBuf> {
-        // Check system-wide config first
-        let system_config = PathBuf::from("/etc/bunnylol/config.toml");
         let user_config = Self::get_config_dir().map(|dir| dir.join("config.toml"));
+        let system_config = PathBuf::from("/etc/bunnylol/config.toml");
 
         if system_config.exists() {
             // Warn if both configs exist
@@ -216,21 +226,22 @@ impl BunnylolConfig {
             return Some(system_config);
         }
 
-        // Fall back to user config
-        user_config
+        Self::get_existing_config_path().or(user_config)
     }
 
     /// Get the full path to the config file for writing
     /// Returns: /etc/bunnylol/config.toml if writable (running as root)
     ///       or $XDG_CONFIG_HOME/bunnylol/config.toml otherwise
     pub fn get_config_path_for_writing() -> Option<PathBuf> {
-        // If running as root (or /etc/bunnylol exists and is writable), use system config
+        if let Some(existing_path) = Self::get_existing_config_path() {
+            return Some(existing_path);
+        }
+
         let system_config_dir = PathBuf::from("/etc/bunnylol");
-        if system_config_dir.exists() || std::fs::create_dir_all(&system_config_dir).is_ok() {
+        if !system_config_dir.exists() && std::fs::create_dir_all(&system_config_dir).is_ok() {
             return Some(system_config_dir.join("config.toml"));
         }
 
-        // Otherwise use user config
         Self::get_config_dir().map(|dir| dir.join("config.toml"))
     }
 
@@ -244,7 +255,7 @@ impl BunnylolConfig {
     /// If the file doesn't exist, creates it with default configuration
     /// If the file exists but is invalid, returns an error
     pub fn load() -> Result<Self, String> {
-        let config_path = match Self::get_config_path() {
+        let config_path = match Self::get_existing_config_path() {
             Some(path) => path,
             None => {
                 // No config exists, try to create one
@@ -268,6 +279,14 @@ impl BunnylolConfig {
 
         toml::from_str(&contents)
             .map_err(|e| format!("Failed to parse config file {:?}: {}", config_path, e))
+    }
+
+    /// Persist configuration to the active config path.
+    pub fn save(&self) -> Result<PathBuf, String> {
+        let path = Self::get_config_path_for_writing()
+            .ok_or_else(|| "Could not determine a writable config path".to_string())?;
+        self.write_to_file(&path)?;
+        Ok(path)
     }
 
     /// Write configuration to a file
