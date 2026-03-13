@@ -265,7 +265,7 @@ impl BunnylolConfig {
                         eprintln!("Warning: Failed to write default config file: {}", e);
                         eprintln!("Continuing with default configuration...");
                     } else {
-                        println!("Created default config file at: {}", write_path.display());
+                        eprintln!("Created default config file at: {}", write_path.display());
                     }
                     return Ok(default_config);
                 }
