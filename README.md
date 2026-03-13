@@ -163,7 +163,7 @@ $ bunnylol blog
 Override Google as the fallback search engine:
 
 ```toml
-default_search = "ddg"  # Options: "google" (default), "ddg", "bing"
+default_search = "ddg"  # Options: "google" (default), "ddg", "bing", "kagi"
 ```
 
 When a command isn't recognized, it will search using your configured engine instead of Google.
@@ -200,7 +200,7 @@ dotfiles = "gh username/dotfiles"
 notes = "gh username/notes"
 
 # Default search engine when command not recognized (optional)
-# Options: "google" (default), "ddg", "bing"
+# Options: "google" (default), "ddg", "bing", "kagi"
 default_search = "ddg"
 
 # Command history settings (optional)
@@ -406,6 +406,7 @@ You can set your default search engine to `http://localhost:8000/?cmd=%s` and us
 | `soundcloud` | `sc` | Navigate to SoundCloud (supports: `likes`) | `sc edm` |
 | `wiki` | `wikipedia` | Search on Wikipedia | `wiki rust programming` |
 | `ddg` | `duckduckgo` | Search DuckDuckGo | `ddg rust programming` |
+| `kagi` | `kg` | Search Kagi | `kagi rust programming` |
 
 ### Bunnylol Development Tools
 

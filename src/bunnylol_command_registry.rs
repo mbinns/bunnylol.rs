@@ -56,6 +56,7 @@ impl BunnylolCommandRegistry {
         crate::commands::GmailCommand,
         crate::commands::REICommand,
         crate::commands::InstagramCommand,
+        crate::commands::KagiCommand,
         crate::commands::LinkedInCommand,
         crate::commands::FacebookCommand,
         crate::commands::ThreadsCommand,
@@ -167,11 +168,13 @@ mod cache_tests {
         assert!(lookup.contains_key("tw"));
         assert!(lookup.contains_key("r"));
         assert!(lookup.contains_key("reddit"));
+        assert!(lookup.contains_key("kagi"));
+        assert!(lookup.contains_key("kg"));
 
-        // Verify we have 83+ total bindings (47 commands with multiple aliases each)
+        // Verify we have 84+ total bindings (47 commands with multiple aliases each)
         assert!(
-            lookup.len() >= 83,
-            "Expected at least 83 bindings, got {}",
+            lookup.len() >= 84,
+            "Expected at least 84 bindings, got {}",
             lookup.len()
         );
     }

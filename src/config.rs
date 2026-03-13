@@ -19,7 +19,7 @@ pub struct BunnylolConfig {
     pub browser: Option<String>,
 
     /// Default search engine when command not recognized (optional)
-    /// Options: "google" (default), "ddg", "bing"
+    /// Options: "google" (default), "ddg", "bing", "kagi"
     #[serde(default = "default_search_engine")]
     pub default_search: String,
 
@@ -319,7 +319,7 @@ impl BunnylolConfig {
 {}
 
 # Default search engine when command not recognized
-# Options: "google" (default), "ddg", "bing"
+# Options: "google" (default), "ddg", "bing", "kagi"
 default_search = "{}"
 
 # Custom command aliases
@@ -393,6 +393,7 @@ log_level = "{}"
         match self.default_search.as_str() {
             "ddg" | "duckduckgo" => format!("https://duckduckgo.com/?q={}", encoded_query),
             "bing" => format!("https://www.bing.com/search?q={}", encoded_query),
+            "kagi" => format!("https://kagi.com/search?q={}", encoded_query),
             _ => format!("https://www.google.com/search?q={}", encoded_query), // Default to Google
         }
     }
@@ -450,6 +451,14 @@ mod tests {
         config.default_search = "bing".to_string();
         let url = config.get_search_url("test query");
         assert!(url.starts_with("https://www.bing.com/search?q="));
+    }
+
+    #[test]
+    fn test_get_search_url_kagi() {
+        let mut config = BunnylolConfig::default();
+        config.default_search = "kagi".to_string();
+        let url = config.get_search_url("test query");
+        assert!(url.starts_with("https://kagi.com/search?q="));
     }
 
     #[test]

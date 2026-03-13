@@ -401,7 +401,7 @@ Example configuration:
 # browser = "firefox"
 
 # Default search engine when command not recognized
-# Options: "google" (default), "ddg", "bing"
+# Options: "google" (default), "ddg", "bing", "kagi"
 default_search = "google"
 
 # Custom command aliases
