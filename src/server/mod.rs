@@ -87,14 +87,9 @@ mod server_impl {
         match cmd {
             Some(cmd_str) => {
                 println!("bunnylol command: {}", cmd_str);
-
-                let resolved_cmd = config.resolve_command(cmd_str);
-                let command = utils::get_command_from_query_string(&resolved_cmd);
-                let redirect_url = BunnylolCommandRegistry::process_command_with_config(
-                    command,
-                    &resolved_cmd,
-                    Some(&config),
-                );
+                let resolved = config.resolve_command(cmd_str);
+                let command = utils::get_command_from_query_string(&resolved);
+                let redirect_url = BunnylolCommandRegistry::process_command(command, &resolved);
                 println!("redirecting to: {}", redirect_url);
 
                 // Track command in history if enabled
@@ -263,7 +258,7 @@ mod tests {
     fn test_search_resolves_aliases() {
         let mut config = BunnylolConfig::default();
         config.history.enabled = false;
-        config.aliases = HashMap::from([("work".to_string(), "gh mbinns".to_string())]);
+        config.aliases = HashMap::from([("work".to_string(), "gh @octocat".to_string())]);
 
         let state = AppState {
             config: RwLock::new(config),
@@ -278,7 +273,7 @@ mod tests {
         assert_eq!(response.status(), Status::SeeOther);
         assert_eq!(
             response.headers().get_one("Location"),
-            Some("https://github.com/mbinns")
+            Some("https://github.com/octocat")
         );
     }
 }

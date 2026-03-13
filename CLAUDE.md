@@ -110,11 +110,11 @@ Located in `src/utils/url_encoding.rs`:
        }
 
        fn get_info() -> BunnylolCommandInfo {
-           BunnylolCommandInfo {
-               bindings: Self::BINDINGS.iter().map(|s| s.to_string()).collect(),
-               description: "Description here".to_string(),
-               example: "alias1 example".to_string(),
-           }
+           BunnylolCommandInfo::new(
+               Self::BINDINGS,
+               "Description here",
+               "alias1 example",
+           )
        }
    }
 

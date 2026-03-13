@@ -9,12 +9,27 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::OnceLock;
+
+/// Global singleton for BunnylolConfig, initialized once at startup!
+static GLOBAL_CONFIG: OnceLock<BunnylolConfig> = OnceLock::new();
+
+/// Call once on startup
+pub fn init_global_config(config: BunnylolConfig) {
+    let _ = GLOBAL_CONFIG.set(config);
+}
+
+/// Get a reference to the global config, after initialized.
+pub fn get_global_config() -> Option<&'static BunnylolConfig> {
+    GLOBAL_CONFIG.get()
+}
 
 /// Configuration for bunnylol CLI
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BunnylolConfig {
     /// Browser to open URLs in (optional)
     /// Examples: "firefox", "chrome", "chromium", "safari"
+    /// If not set, uses the OS default browser
     #[serde(default)]
     pub browser: Option<String>,
 
@@ -22,6 +37,11 @@ pub struct BunnylolConfig {
     /// Options: "google" (default), "ddg", "bing", "kagi"
     #[serde(default = "default_search_engine")]
     pub default_search: String,
+
+    /// Stock website provider
+    /// Options: "yahoo" (default), "finviz", "tradingview", "google", "investing"
+    #[serde(default = "default_stock_provider")]
+    pub stock_provider: String,
 
     /// Custom command aliases
     #[serde(default)]
@@ -41,6 +61,7 @@ impl Default for BunnylolConfig {
         Self {
             browser: None,
             default_search: default_search_engine(),
+            stock_provider: default_stock_provider(),
             aliases: HashMap::new(),
             history: HistoryConfig::default(),
             server: ServerConfig::default(),
@@ -149,6 +170,10 @@ impl ServerConfig {
 
 fn default_search_engine() -> String {
     "google".to_string()
+}
+
+fn default_stock_provider() -> String {
+    "yahoo".to_string()
 }
 
 fn default_history_enabled() -> bool {
@@ -306,6 +331,24 @@ impl BunnylolConfig {
 
     /// Convert config to TOML string with helpful comments
     fn to_toml_with_comments(&self) -> String {
+        let browser_line = match &self.browser {
+            Some(b) => format!("browser = \"{}\"", b),
+            None => "# browser = \"firefox\"".to_string(),
+        };
+        let aliases_content = if self.aliases.is_empty() {
+            "# my-alias = \"gh username/repo\"".to_string()
+        } else {
+            self.aliases
+                .iter()
+                .map(|(k, v)| format!("{} = \"{}\"", k, v))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        let server_display_url_line = match &self.server.server_display_url {
+            Some(url) => format!("server_display_url = \"{}\"", url),
+            None => "# server_display_url = \"bunny.example.com\"".to_string(),
+        };
+
         format!(
             r#"# Bunnylol Configuration File
 # https://github.com/facebook/bunnylol.rs
@@ -315,12 +358,16 @@ impl BunnylolConfig {
 
 # Browser to open URLs in (optional)
 # Examples: "firefox", "chrome", "chromium", "safari"
-# If not set, uses system default browser
+# If not set, uses the OS default browser
 {}
 
 # Default search engine when command not recognized
 # Options: "google" (default), "ddg", "bing", "kagi"
 default_search = "{}"
+
+# Stock website provider
+# Options: "yahoo" (default), "finviz", "tradingview", "google", "investing"
+stock_provider = "{}"
 
 # Custom command aliases
 # Example: work = "gh mycompany/repo"
@@ -347,31 +394,16 @@ address = "{}"
 log_level = "{}"
 {}
 "#,
-            if let Some(browser) = &self.browser {
-                format!("browser = \"{}\"", browser)
-            } else {
-                "# browser = \"firefox\"".to_string()
-            },
+            browser_line,
             self.default_search,
-            if self.aliases.is_empty() {
-                "# my-alias = \"gh username/repo\"".to_string()
-            } else {
-                self.aliases
-                    .iter()
-                    .map(|(k, v)| format!("{} = \"{}\"", k, v))
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            },
+            self.stock_provider,
+            aliases_content,
             self.history.enabled,
             self.history.max_entries,
             self.server.port,
             self.server.address,
             self.server.log_level,
-            if let Some(url) = &self.server.server_display_url {
-                format!("server_display_url = \"{}\"", url)
-            } else {
-                "# server_display_url = \"bunny.example.com\"".to_string()
-            },
+            server_display_url_line,
         )
     }
 
@@ -386,16 +418,7 @@ log_level = "{}"
 
     /// Get the search engine URL for a query
     pub fn get_search_url(&self, query: &str) -> String {
-        let encoded_query =
-            percent_encoding::utf8_percent_encode(query, percent_encoding::NON_ALPHANUMERIC)
-                .to_string();
-
-        match self.default_search.as_str() {
-            "ddg" | "duckduckgo" => format!("https://duckduckgo.com/?q={}", encoded_query),
-            "bing" => format!("https://www.bing.com/search?q={}", encoded_query),
-            "kagi" => format!("https://kagi.com/search?q={}", encoded_query),
-            _ => format!("https://www.google.com/search?q={}", encoded_query), // Default to Google
-        }
+        crate::commands::search_url(&self.default_search, query)
     }
 }
 
@@ -408,6 +431,7 @@ mod tests {
         let config = BunnylolConfig::default();
         assert_eq!(config.browser, None);
         assert_eq!(config.default_search, "google");
+        assert_eq!(config.stock_provider, "yahoo");
         assert!(config.aliases.is_empty());
         assert!(config.history.enabled);
         assert_eq!(config.history.max_entries, 1000);
@@ -429,28 +453,19 @@ mod tests {
     }
 
     #[test]
-    fn test_get_search_url_google() {
-        let config = BunnylolConfig::default();
-        let url = config.get_search_url("hello world");
-        assert!(url.starts_with("https://www.google.com/search?q="));
-        assert!(url.contains("hello"));
-        assert!(url.contains("world"));
-    }
-
-    #[test]
-    fn test_get_search_url_ddg() {
+    fn test_resolved_alias_produces_correct_redirect() {
         let mut config = BunnylolConfig::default();
-        config.default_search = "ddg".to_string();
-        let url = config.get_search_url("test query");
-        assert!(url.starts_with("https://duckduckgo.com/?q="));
-    }
+        config
+            .aliases
+            .insert("work".to_string(), "gh mycompany".to_string());
 
-    #[test]
-    fn test_get_search_url_bing() {
-        let mut config = BunnylolConfig::default();
-        config.default_search = "bing".to_string();
-        let url = config.get_search_url("test query");
-        assert!(url.starts_with("https://www.bing.com/search?q="));
+        let resolved = config.resolve_command("work");
+        let command = crate::utils::get_command_from_query_string(&resolved);
+        let url = crate::BunnylolCommandRegistry::process_command(command, &resolved);
+        assert_eq!(
+            url,
+            "https://github.com/search?q=mycompany&type=repositories"
+        );
     }
 
     #[test]
@@ -517,8 +532,8 @@ mod tests {
     #[test]
     fn test_get_display_url_with_domain() {
         let mut config = ServerConfig::default();
-        config.server_display_url = Some("bunny.alichtman.com".to_string());
-        assert_eq!(config.get_display_url(), "https://bunny.alichtman.com");
+        config.server_display_url = Some("bunny.example.com".to_string());
+        assert_eq!(config.get_display_url(), "https://bunny.example.com");
     }
 
     #[test]
@@ -595,17 +610,14 @@ mod tests {
             port = 8000
             address = "0.0.0.0"
             log_level = "normal"
-            server_display_url = "bunny.alichtman.com"
+            server_display_url = "bunny.example.com"
         "#;
 
         let config: BunnylolConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(
             config.server.server_display_url,
-            Some("bunny.alichtman.com".to_string())
+            Some("bunny.example.com".to_string())
         );
-        assert_eq!(
-            config.server.get_display_url(),
-            "https://bunny.alichtman.com"
-        );
+        assert_eq!(config.server.get_display_url(), "https://bunny.example.com");
     }
 }

@@ -14,12 +14,11 @@ impl BunnylolCommand for GoogleSearchCommand {
     }
 
     fn get_info() -> BunnylolCommandInfo {
-        BunnylolCommandInfo {
-            bindings: vec!["g".to_string(), "(default)".to_string()],
-            description: "Search Google (default fallback for any unrecognized command)"
-                .to_string(),
-            example: "g rust programming".to_string(),
-        }
+        BunnylolCommandInfo::new(
+            &["g", "(default)"],
+            "Search Google (default fallback for any unrecognized command)",
+            "g rust programming",
+        )
     }
 }
 
@@ -56,6 +55,14 @@ mod tests {
         assert_eq!(
             GoogleSearchCommand::process_args("g"),
             "https://google.com/search?q="
+        );
+    }
+
+    #[test]
+    fn test_google_search_command_with_ampersand() {
+        assert_eq!(
+            GoogleSearchCommand::process_args("g Peak Sports & Spine Physical Therapy"),
+            "https://google.com/search?q=Peak%20Sports%20%26%20Spine%20Physical%20Therapy"
         );
     }
 }
