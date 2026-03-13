@@ -84,6 +84,29 @@ pub fn render_landing_page_html(config: &BunnylolConfig) -> String {
                             .tab-panel[hidden] {{
                                 display: none !important;
                             }}
+                            .help-button {{
+                                width: 40px;
+                                height: 40px;
+                                border-radius: 999px;
+                                border: 1px solid var(--border-light);
+                                background: var(--bg-white);
+                                color: var(--text-medium);
+                                font-family: 'JetBrains Mono', monospace;
+                                font-size: 1.2rem;
+                                font-weight: 700;
+                                cursor: pointer;
+                                box-shadow: 0 10px 24px rgba(0, 0, 0, 0.08);
+                                transition: all 0.2s ease;
+                            }}
+                            .help-button.active {{
+                                border-color: transparent;
+                                background: linear-gradient(135deg, var(--accent-blue) 0%, var(--accent-purple) 100%);
+                                color: white;
+                                box-shadow: 0 10px 24px rgba(83, 46, 209, 0.22);
+                            }}
+                            .help-panel[hidden] {{
+                                display: none !important;
+                            }}
                         </style>
                     </head>
                     <body>
@@ -106,6 +129,18 @@ pub fn render_landing_page_html(config: &BunnylolConfig) -> String {
                                     button.addEventListener('click', () => showTab(button.dataset.tabButton));
                                 }});
                                 showTab('commands');
+
+                                const helpButton = document.querySelector('[data-help-button]');
+                                const helpPanel = document.querySelector('[data-help-panel]');
+                                if (helpButton && helpPanel) {{
+                                    helpButton.addEventListener('click', () => {{
+                                        const isOpen = helpButton.getAttribute('aria-expanded') === 'true';
+                                        const nextState = isOpen ? 'false' : 'true';
+                                        helpButton.setAttribute('aria-expanded', nextState);
+                                        helpButton.classList.toggle('active', !isOpen);
+                                        helpPanel.hidden = isOpen;
+                                    }});
+                                }}
                             }})();
                         </script>
                     </body>
@@ -276,7 +311,25 @@ pub fn LandingPage(
             style:padding="20px 30px 30px 30px"
             style:box-shadow="0 20px 60px rgba(0, 0, 0, 0.3)"
             style:font-family="'JetBrains Mono', monospace"
+            style:position="relative"
         >
+            <div
+                style:position="absolute"
+                style:top="18px"
+                style:left="18px"
+                style:z-index="2"
+            >
+                <button
+                    class="help-button"
+                    type="button"
+                    data-help-button
+                    aria-expanded="false"
+                    aria-label="Show setup help"
+                    title="Show setup help"
+                >
+                    "?"
+                </button>
+            </div>
             <h1
                 style:color="var(--text-dark)"
                 style:text-align="center"
@@ -322,8 +375,10 @@ pub fn LandingPage(
                 </a>
             </div>
 
-            // Web Usage section
             <div
+                data-help-panel
+                class="help-panel"
+                hidden=true
                 style:background="var(--bg-light-gray)"
                 style:padding="20px"
                 style:border-radius="6px"
