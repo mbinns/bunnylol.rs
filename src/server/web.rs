@@ -5,30 +5,25 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-use std::sync::OnceLock;
-
 use leptos::*;
 use serde::{Deserialize, Serialize};
 
 use crate::{BunnylolCommandInfo, BunnylolCommandRegistry, BunnylolConfig};
 
-static LANDING_PAGE_HTML_CACHE: OnceLock<String> = OnceLock::new();
-
 /// Render the landing page HTML with the given config
 pub fn render_landing_page_html(config: &BunnylolConfig) -> String {
-    LANDING_PAGE_HTML_CACHE
-        .get_or_init(|| {
-            let display_url = config.server.get_display_url();
-            let body_content = leptos::ssr::render_to_string(move || {
-                view! {
-                    <LandingPage server_display_url=display_url.clone() />
-                }
-            })
-            .to_string();
+    let display_url = config.server.get_display_url();
+    let aliases = config.aliases.clone();
+    let body_content = leptos::ssr::render_to_string(move || {
+        view! {
+            <LandingPage server_display_url=display_url.clone() aliases=aliases.clone() />
+        }
+    })
+    .to_string();
 
-            // Wrap in proper HTML document with favicon
-            format!(
-                r#"<!DOCTYPE html>
+    // Wrap in proper HTML document with favicon
+    format!(
+        r#"<!DOCTYPE html>
                     <html lang="en">
                     <head>
                         <meta charset="UTF-8">
@@ -69,16 +64,54 @@ pub fn render_landing_page_html(config: &BunnylolConfig) -> String {
                                 transform: translateY(-5px);
                                 box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
                             }}
+                            .tab-button {{
+                                border: 1px solid var(--border-light);
+                                background: var(--bg-white);
+                                color: var(--text-medium);
+                                border-radius: 999px;
+                                padding: 10px 16px;
+                                font-family: 'JetBrains Mono', monospace;
+                                font-size: 0.95rem;
+                                cursor: pointer;
+                                transition: all 0.2s ease;
+                            }}
+                            .tab-button.active {{
+                                background: linear-gradient(135deg, var(--accent-blue) 0%, var(--accent-purple) 100%);
+                                color: white;
+                                border-color: transparent;
+                                box-shadow: 0 10px 20px rgba(83, 46, 209, 0.18);
+                            }}
+                            .tab-panel[hidden] {{
+                                display: none !important;
+                            }}
                         </style>
                     </head>
                     <body>
                         {}
+                        <script>
+                            (() => {{
+                                const buttons = Array.from(document.querySelectorAll('[data-tab-button]'));
+                                const panels = Array.from(document.querySelectorAll('[data-tab-panel]'));
+                                const showTab = (tabName) => {{
+                                    buttons.forEach((button) => {{
+                                        const isActive = button.dataset.tabButton === tabName;
+                                        button.classList.toggle('active', isActive);
+                                        button.setAttribute('aria-selected', isActive ? 'true' : 'false');
+                                    }});
+                                    panels.forEach((panel) => {{
+                                        panel.hidden = panel.dataset.tabPanel !== tabName;
+                                    }});
+                                }};
+                                buttons.forEach((button) => {{
+                                    button.addEventListener('click', () => showTab(button.dataset.tabButton));
+                                }});
+                                showTab('commands');
+                            }})();
+                        </script>
                     </body>
                 </html>"#,
-                body_content
-            )
-        })
-        .clone()
+        body_content
+    )
 }
 
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
@@ -86,6 +119,12 @@ pub struct BindingData {
     pub command: String,
     pub description: String,
     pub example: String,
+}
+
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
+pub struct AliasData {
+    pub alias: String,
+    pub target: String,
 }
 
 impl From<BunnylolCommandInfo> for BindingData {
@@ -160,14 +199,70 @@ fn BindingCard(binding: BindingData) -> impl IntoView {
 }
 
 #[component]
-pub fn LandingPage(server_display_url: String) -> impl IntoView {
+fn AliasCard(alias: AliasData) -> impl IntoView {
+    view! {
+        <div
+            class="binding-card"
+            style:background="linear-gradient(135deg, #fff9e8 0%, #ffe8cc 100%)"
+            style:border-radius="8px"
+            style:padding="20px"
+            style:transition="transform 0.2s, box-shadow 0.2s"
+            style:border="2px solid #ffd8a8"
+        >
+            <div
+                style:font-family="'JetBrains Mono', monospace"
+                style:font-size="1.3em"
+                style:font-weight="700"
+                style:color="var(--accent-purple)"
+                style:margin-bottom="12px"
+            >
+                {alias.alias}
+            </div>
+            <div
+                style:font-size="0.85em"
+                style:color="var(--text-medium)"
+                style:margin-bottom="8px"
+                style:font-weight="600"
+            >
+                "Resolves to"
+            </div>
+            <div
+                style:font-family="'JetBrains Mono', monospace"
+                style:background="var(--bg-white)"
+                style:padding="12px"
+                style:border-radius="4px"
+                style:color="var(--text-dark)"
+                style:border="1px solid #ffd8a8"
+                style:line-height="1.5"
+                style:word-break="break-word"
+            >
+                {alias.target}
+            </div>
+        </div>
+    }
+}
+
+#[component]
+pub fn LandingPage(
+    server_display_url: String,
+    aliases: std::collections::HashMap<String, String>,
+) -> impl IntoView {
     let mut bindings: Vec<BindingData> = BunnylolCommandRegistry::get_all_commands()
         .iter()
         .map(|cmd| (*cmd).clone().into())
         .collect();
+    let mut alias_entries: Vec<AliasData> = aliases
+        .into_iter()
+        .map(|(alias, target)| AliasData { alias, target })
+        .collect();
 
     // Sort bindings alphabetically by command name
     bindings.sort_by(|a, b| a.command.to_lowercase().cmp(&b.command.to_lowercase()));
+    alias_entries.sort_by(|a, b| a.alias.to_lowercase().cmp(&b.alias.to_lowercase()));
+    let binding_count = bindings.len();
+    let alias_count = alias_entries.len();
+    let has_aliases = alias_count > 0;
+    let alias_entries = store_value(alias_entries);
 
     // Clone server_display_url for use in the view
     let example_url = format!("{}/?cmd=gh facebook/bunnylol.rs", server_display_url);
@@ -373,10 +468,37 @@ pub fn LandingPage(server_display_url: String) -> impl IntoView {
                 style:font-size="1.1em"
                 style:font-weight="600"
             >
-                "Available Commands"
+                "Available Shortcuts"
             </div>
 
             <div
+                style:display="flex"
+                style:justify-content="center"
+                style:gap="12px"
+                style:margin-bottom="24px"
+                style:flex-wrap="wrap"
+            >
+                <button
+                    class="tab-button active"
+                    type="button"
+                    data-tab-button="commands"
+                    aria-selected="true"
+                >
+                    {format!("Commands ({})", binding_count)}
+                </button>
+                <button
+                    class="tab-button"
+                    type="button"
+                    data-tab-button="aliases"
+                    aria-selected="false"
+                >
+                    {format!("Aliases ({})", alias_count)}
+                </button>
+            </div>
+
+            <div
+                data-tab-panel="commands"
+                class="tab-panel"
                 style:display="grid"
                 style:grid-template-columns="repeat(auto-fill, minmax(350px, 1fr))"
                 style:gap="20px"
@@ -388,6 +510,79 @@ pub fn LandingPage(server_display_url: String) -> impl IntoView {
                     children=|binding| view! { <BindingCard binding=binding /> }
                 />
             </div>
+
+            <div
+                data-tab-panel="aliases"
+                class="tab-panel"
+                hidden=true
+            >
+                <Show
+                    when=move || has_aliases
+                    fallback=|| view! {
+                        <div
+                            style:background="linear-gradient(135deg, #fff9e8 0%, #fff4d6 100%)"
+                            style:border="1px solid #ffd8a8"
+                            style:border-radius="10px"
+                            style:padding="28px"
+                            style:text-align="center"
+                            style:color="var(--text-medium)"
+                            style:line-height="1.7"
+                        >
+                            <div
+                                style:font-size="1.1em"
+                                style:font-weight="700"
+                                style:color="var(--text-dark)"
+                                style:margin-bottom="8px"
+                            >
+                                "No aliases configured"
+                            </div>
+                            <div>
+                                "Add entries under "
+                                <code
+                                    style:font-family="'JetBrains Mono', monospace"
+                                    style:background="var(--bg-white)"
+                                    style:padding="2px 6px"
+                                    style:border-radius="4px"
+                                >
+                                    "[aliases]"
+                                </code>
+                                " in your config file and restart the server."
+                            </div>
+                        </div>
+                    }
+                >
+                    <div
+                        style:display="grid"
+                        style:grid-template-columns="repeat(auto-fill, minmax(320px, 1fr))"
+                        style:gap="20px"
+                    >
+                        <For
+                            each=move || alias_entries.get_value()
+                            key=|alias| alias.alias.clone()
+                            children=|alias| view! { <AliasCard alias=alias /> }
+                        />
+                    </div>
+                </Show>
+            </div>
         </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn render_landing_page_includes_aliases() {
+        let mut config = BunnylolConfig::default();
+        config
+            .aliases
+            .insert("work".to_string(), "gh mycompany/repo".to_string());
+
+        let html = render_landing_page_html(&config);
+
+        assert!(html.contains("Aliases (1)"));
+        assert!(html.contains("work"));
+        assert!(html.contains("gh mycompany"));
     }
 }
